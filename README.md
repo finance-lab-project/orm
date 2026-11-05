@@ -8,4 +8,4 @@ The canonical [architecture](https://github.com/finance-lab-project/app/blob/mai
 
 Java without Spring. Business modules own their domain, application API, Vaadin adapters, persistence mappings and reviewed SQL migrations. The ORM is a library; business rules and aggregate revisions remain with the business module. Root assembly pins immutable module versions.
 
-No runnable implementation or completed checks are claimed by this initial repository setup. Separate learning issues are not part of this backlog. Use synthetic examples only; no real financial data, employer material, secrets or local paths.
+The [proposed API contract](docs/api-contract.md) and [contract-test brief](docs/contract-tests.md) cover the design in [issue #1](https://github.com/finance-lab-project/orm/issues/1). They require acceptance before runtime implementation; no runnable mapper is claimed. Separate learning issues are not part of this backlog. Use synthetic examples only; no real financial data, employer material, secrets or local paths.
