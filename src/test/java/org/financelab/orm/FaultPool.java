@@ -10,6 +10,11 @@ final class FaultPool implements JdbcTransactions.Pool {
     final HikariDataSource dataSource;
     final Map<Connection, Connection> borrowed = new IdentityHashMap<>();
     int borrows, commits, rollbacks, releases, discards, statements, results, autoCommitResets;
+    int queries, updates;
+    Integer reportedUpdates;
+    record Binding(String method, int index, Object value) {}
+    record StatementTrace(String sql, List<Binding> bindings) {}
+    final List<StatementTrace> traces = new ArrayList<>();
     String point;
     boolean after;
     Throwable fault;
@@ -42,7 +47,7 @@ final class FaultPool implements JdbcTransactions.Pool {
             String point = name.equals("setReadOnly") && (commits > 0 || rollbacks > 0) ? "reset" : name;
             fire(point, false);
             Object value = invoke(real, m, args);
-            if (name.equals("prepareStatement")) value = statement((PreparedStatement) value, !args[0].toString().startsWith("SET LOCAL"));
+            if (name.equals("prepareStatement")) value = statement((PreparedStatement) value, args[0].toString());
             fire(point, true);
             return value;
         });
@@ -50,13 +55,20 @@ final class FaultPool implements JdbcTransactions.Pool {
         return wrapped;
     }
 
-    private PreparedStatement statement(PreparedStatement real, boolean application) {
+    private PreparedStatement statement(PreparedStatement real, String sql) {
+        boolean application = !sql.startsWith("SET LOCAL");
+        StatementTrace trace = new StatementTrace(sql, new ArrayList<>());
+        if (application) traces.add(trace);
         statements++;
         return proxy(PreparedStatement.class, (p, m, args) -> {
             String name = m.getName();
             String point = application ? "statement." + (name.startsWith("set") ? "bind" : name) : "setup." + name;
             fire(point, false);
+            if (application && name.startsWith("set")) trace.bindings().add(new Binding(name, (int) args[0], args[1]));
+            if (application && name.equals("executeQuery")) queries++;
+            if (application && name.equals("executeUpdate")) updates++;
             Object value = invoke(real, m, args);
+            if (application && name.equals("executeUpdate") && reportedUpdates != null) value = reportedUpdates;
             if (name.equals("close")) statements--;
             if (value instanceof ResultSet rs) value = rows(rs);
             fire(point, true);

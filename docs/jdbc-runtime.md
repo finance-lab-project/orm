@@ -2,10 +2,10 @@
 
 Scope: [issue #2](https://github.com/finance-lab-project/orm/issues/2), using the
 accepted [API contract](api-contract.md). Package: `org.financelab.orm`.
-This increment supplies `Transactions`, callback-scoped `ReadSession` /
+The runtime supplies `Transactions`, callback-scoped `ReadSession` /
 `WriteSession`, `Sql`, `Param`, `Row`, exact `Codecs`, `Completed` and
-`PersistenceFailure`. Descriptor-driven SQL generation and projections are not
-implemented in this issue. Future mapped operations use the same scoped session
+`PersistenceFailure`. [Anchor mappings](anchor-mapping.md), delivered separately
+in issue #3, use the same scoped session
 and connection as `execute` / `query`; no separate transaction path is needed.
 
 ## Use and ownership
@@ -59,7 +59,7 @@ or floating-point conversion occurs. DATE supports the common finite
 pgJDBC/PostgreSQL range `-4712-01-01` through `5874897-12-31`; Instant supports
 the same lower date through `294276-12-31T23:59:59.999999Z`. Driver infinity
 sentinels are rejected. Reviewed SQL may explicitly bind/read SQL NULL via
-`Optional.empty()`; a future mapped NOT NULL lookup must reject NULL in a
+`Optional.empty()`; mapped NOT NULL lookups reject NULL in a
 present fact rather than confuse it with a missing row.
 
 ## Failure outcomes and cleanup
@@ -124,8 +124,9 @@ mapper/close/rollback/commit/reset/release/discard failures. Both before-forward
 and after-forward lost commits must report UNKNOWN; rereads prove whether the
 synthetic row actually committed. Resource counters and the real pool's active
 borrow count check the scoped failure cases. Mapping metadata, generated SQL,
-Category projections and Budget business-rule cases in the full
-[contract-test brief](contract-tests.md) remain with their delivery issues.
+Category projections are covered by [issue #3](anchor-mapping.md). Budget
+business-rule cases in the full [contract-test brief](contract-tests.md) remain
+with Budget's delivery issues.
 
 Local observed results are recorded in the implementing PR; no asynchronous
 GitHub checks or deployment outcome is inferred from local tests.

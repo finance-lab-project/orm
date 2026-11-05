@@ -4,7 +4,9 @@ import com.zaxxer.hikari.HikariDataSource;
 import org.postgresql.util.PSQLException;
 
 import java.sql.*;
+import java.time.Instant;
 import java.util.*;
+import java.util.function.Supplier;
 
 /** Synchronous callback scopes over a root-owned Hikari pool. No callback or SQL retries. */
 public final class JdbcTransactions implements Transactions {
@@ -47,7 +49,7 @@ public final class JdbcTransactions implements Transactions {
     }
     @Override public <R> Completed<R> snapshot(Work<ReadSession, R> work) {
         Objects.requireNonNull(work);
-        return run(true, s -> work.run(s::query));
+        return run(true, s -> work.run(new ReadView(s)));
     }
 
     private <R> Completed<R> run(boolean snapshot, Work<WriteSession, R> work) {
@@ -145,6 +147,20 @@ public final class JdbcTransactions implements Transactions {
 
     private record Baseline(boolean autoCommit, boolean readOnly, int isolation) {}
 
+    private record ReadView(ReadSession session) implements ReadSession {
+        public <A, I> boolean exists(Anchor<A, I> a, I id) { return session.exists(a, id); }
+        public <A, I, V> Optional<V> readStatic(Scalar<A, I, V, Static> m, I id) { return session.readStatic(m, id); }
+        public <A, I, C> Optional<C> readStatic(Knotted<A, I, C, Static> m, I id) { return session.readStatic(m, id); }
+        public <A, I, B, J> Optional<J> readTie(StaticTie<A, I, B, J> m, I id) { return session.readTie(m, id); }
+        public <A, I, V> Optional<Fact<V>> current(Scalar<A, I, V, Recorded> m, I id) { return session.current(m, id); }
+        public <A, I, C> Optional<Fact<C>> current(Knotted<A, I, C, Recorded> m, I id) { return session.current(m, id); }
+        public <A, I, V> Optional<Fact<V>> asOf(Scalar<A, I, V, Recorded> m, I id, Instant at) { return session.asOf(m, id, at); }
+        public <A, I, C> Optional<Fact<C>> asOf(Knotted<A, I, C, Recorded> m, I id, Instant at) { return session.asOf(m, id, at); }
+        public <A, I, V> List<Fact<V>> history(Scalar<A, I, V, Recorded> m, I id) { return session.history(m, id); }
+        public <A, I, C> List<Fact<C>> history(Knotted<A, I, C, Recorded> m, I id) { return session.history(m, id); }
+        public <R> List<R> query(Sql sql, List<Param<?>> params, RowMapper<R> mapper) { return session.query(sql, params, mapper); }
+    }
+
     private static final class Session implements WriteSession {
         private final Connection connection;
         private final Thread owner = Thread.currentThread();
@@ -195,6 +211,97 @@ public final class JdbcTransactions implements Transactions {
         }
         private static <V> void bind(PreparedStatement statement, int index, Param<V> param) throws SQLException {
             param.codec().bind(statement, index, param.value());
+        }
+
+        private <R> R mapped(Supplier<R> operation) {
+            check();
+            try { return operation.get(); }
+            catch (Throwable failure) { throw failed(failure); }
+        }
+        private void insert(Sql sql, List<Param<?>> params) {
+            if (execute(sql, params) != 1) throw new IllegalStateException("Mapped insert must affect exactly one row");
+        }
+        private static <V> V required(Row row, int index, Codec<V> codec) {
+            return row.get(index, codec).orElseThrow(() -> new IllegalStateException("NULL in a mapped NOT NULL column"));
+        }
+        private static <V> Optional<V> one(List<V> values) {
+            if (values.size() > 1) throw new IllegalStateException("Multiple rows for a mapped identity");
+            return values.isEmpty() ? Optional.empty() : Optional.of(values.getFirst());
+        }
+
+        @Override public <A, I> void insertAnchor(Anchor<A, I> anchor, I id) {
+            mapped(() -> {
+                insert(AnchorSql.insert(anchor.table(), anchor.id()), List.of(Param.of(anchor.id().codec(), id)));
+                return null;
+            });
+        }
+        @Override public <A, I, V> void insertStatic(Scalar<A, I, V, Static> map, I id, V value) {
+            mapped(() -> {
+                insert(AnchorSql.insert(map.table(), map.id(), map.value()),
+                        List.of(Param.of(map.id().codec(), id), Param.of(map.value().codec(), value)));
+                return null;
+            });
+        }
+        @Override public <A, I, C> void insertStatic(Knotted<A, I, C, Static> map, I id, C code) {
+            mapped(() -> { insertStatic(map.scalar(), id, code); return null; });
+        }
+        @Override public <A, I, B, J> void insertTie(StaticTie<A, I, B, J> map, I id, J target) {
+            mapped(() -> {
+                insert(AnchorSql.insert(map.table(), map.sourceId(), map.targetId()),
+                        List.of(Param.of(map.sourceId().codec(), id), Param.of(map.targetId().codec(), target)));
+                return null;
+            });
+        }
+        @Override public <A, I, V> void append(Scalar<A, I, V, Recorded> map, I id, Instant at, V value) {
+            mapped(() -> {
+                insert(AnchorSql.insert(map.table(), map.id(), map.time().changedAt(), map.value()),
+                        List.of(Param.of(map.id().codec(), id), Param.of(map.time().changedAt().codec(), at),
+                                Param.of(map.value().codec(), value)));
+                return null;
+            });
+        }
+        @Override public <A, I, C> void append(Knotted<A, I, C, Recorded> map, I id, Instant at, C code) {
+            mapped(() -> { append(map.scalar(), id, at, code); return null; });
+        }
+        @Override public <A, I> boolean exists(Anchor<A, I> anchor, I id) {
+            return mapped(() -> one(query(AnchorSql.lookup(anchor.table(), anchor.id(), anchor.id()),
+                    List.of(Param.of(anchor.id().codec(), id)), r -> required(r, 1, anchor.id().codec()))).isPresent());
+        }
+        @Override public <A, I, V> Optional<V> readStatic(Scalar<A, I, V, Static> map, I id) {
+            return mapped(() -> one(query(AnchorSql.lookup(map.table(), map.id(), map.value()),
+                    List.of(Param.of(map.id().codec(), id)), r -> required(r, 1, map.value().codec()))));
+        }
+        @Override public <A, I, C> Optional<C> readStatic(Knotted<A, I, C, Static> map, I id) {
+            return mapped(() -> readStatic(map.scalar(), id));
+        }
+        @Override public <A, I, B, J> Optional<J> readTie(StaticTie<A, I, B, J> map, I id) {
+            return mapped(() -> one(query(AnchorSql.lookup(map.table(), map.sourceId(), map.targetId()),
+                    List.of(Param.of(map.sourceId().codec(), id)), r -> required(r, 1, map.targetId().codec()))));
+        }
+        private <A, I, V> List<Fact<V>> facts(Scalar<A, I, V, Recorded> map, I id, Optional<Instant> at, boolean history) {
+            List<Param<?>> params = new ArrayList<>();
+            params.add(Param.of(map.id().codec(), id));
+            at.ifPresent(t -> params.add(Param.of(map.time().changedAt().codec(), t)));
+            return query(AnchorSql.facts(map.table(), map.id(), map.value(), map.time(), at.isPresent(), history),
+                    params, r -> new Fact<>(required(r, 1, map.time().changedAt().codec()), required(r, 2, map.value().codec())));
+        }
+        @Override public <A, I, V> Optional<Fact<V>> current(Scalar<A, I, V, Recorded> map, I id) {
+            return mapped(() -> one(facts(map, id, Optional.empty(), false)));
+        }
+        @Override public <A, I, C> Optional<Fact<C>> current(Knotted<A, I, C, Recorded> map, I id) {
+            return mapped(() -> current(map.scalar(), id));
+        }
+        @Override public <A, I, V> Optional<Fact<V>> asOf(Scalar<A, I, V, Recorded> map, I id, Instant at) {
+            return mapped(() -> one(facts(map, id, Optional.of(at), false)));
+        }
+        @Override public <A, I, C> Optional<Fact<C>> asOf(Knotted<A, I, C, Recorded> map, I id, Instant at) {
+            return mapped(() -> asOf(map.scalar(), id, at));
+        }
+        @Override public <A, I, V> List<Fact<V>> history(Scalar<A, I, V, Recorded> map, I id) {
+            return mapped(() -> facts(map, id, Optional.empty(), true));
+        }
+        @Override public <A, I, C> List<Fact<C>> history(Knotted<A, I, C, Recorded> map, I id) {
+            return mapped(() -> history(map.scalar(), id));
         }
 
         @Override public int execute(Sql sql, List<Param<?>> params) {
