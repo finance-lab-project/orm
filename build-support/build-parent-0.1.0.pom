@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>org.financelab</groupId>
+    <artifactId>build-parent</artifactId>
+    <version>0.1.0</version>
+    <packaging>pom</packaging>
+    <name>Finance Lab build conventions</name>
+    <url>https://github.com/finance-lab-project/app</url>
+    <scm>
+        <connection>scm:git:https://github.com/finance-lab-project/app.git</connection>
+        <url>https://github.com/finance-lab-project/app</url>
+        <tag>v0.1.0</tag>
+    </scm>
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <project.build.outputTimestamp>2026-11-05T00:00:00Z</project.build.outputTimestamp>
+        <maven.compiler.release>27</maven.compiler.release>
+        <source.repository>https://github.com/finance-lab-project/app</source.repository>
+    </properties>
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-clean-plugin</artifactId><version>3.5.0</version></plugin>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-resources-plugin</artifactId><version>3.5.0</version></plugin>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-compiler-plugin</artifactId><version>3.16.0</version></plugin>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-surefire-plugin</artifactId><version>3.6.1</version></plugin>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-failsafe-plugin</artifactId><version>3.6.1</version></plugin>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId><artifactId>maven-jar-plugin</artifactId><version>3.5.1</version>
+                    <configuration><archive><manifestEntries>
+                        <Build-Source-Repository>${source.repository}</Build-Source-Repository>
+                        <Build-Source-Revision>${source.revision}</Build-Source-Revision>
+                    </manifestEntries></archive></configuration>
+                </plugin>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-war-plugin</artifactId><version>3.5.1</version></plugin>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-install-plugin</artifactId><version>3.1.4</version></plugin>
+                <plugin><groupId>org.apache.maven.plugins</groupId><artifactId>maven-deploy-plugin</artifactId><version>3.1.4</version></plugin>
+            </plugins>
+        </pluginManagement>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId><artifactId>maven-enforcer-plugin</artifactId><version>3.7.0</version>
+                <executions><execution><goals><goal>enforce</goal></goals><configuration><rules>
+                    <requireJavaVersion><version>[27,28)</version></requireJavaVersion>
+                    <requireMavenVersion><version>[3.10.0]</version></requireMavenVersion>
+                    <requireProperty><property>source.revision</property><regex>[0-9a-f]{40}</regex>
+                        <message>Supply the full source commit with -Dsource.revision=...; use scripts/verify.sh for the application.</message>
+                    </requireProperty>
+                    <requireReleaseVersion/>
+                    <requireReleaseDeps/>
+                    <banDynamicVersions/>
+                </rules></configuration></execution></executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>
